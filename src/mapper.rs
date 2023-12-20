@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
+use std::io::BufReader;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
 
@@ -12,9 +14,13 @@ pub enum MapperMessage {
     GetId {
         respond_to: oneshot::Sender<usize>,
     },
-    ProcessFile {
+    ProcessFileTest {
         filename: PathBuf,
         respond_to: oneshot::Sender<String>,
+    },
+    ProcessFile {
+        filename: PathBuf,
+        respond_to: oneshot::Sender<HashMap<String, u32>>,
     },
 }
 
@@ -32,7 +38,7 @@ impl Mapper {
                 self.message_id += 1;
                 let _ = respond_to.send(self.message_id);
             }
-            MapperMessage::ProcessFile {
+            MapperMessage::ProcessFileTest {
                 filename,
                 respond_to,
             } => {
@@ -40,6 +46,22 @@ impl Mapper {
                 let mut contents = String::new();
                 file.read_to_string(&mut contents).unwrap();
                 let _ = respond_to.send(contents);
+            }
+            MapperMessage::ProcessFile {
+                filename,
+                respond_to,
+            } => {
+                let file = File::open(&filename).unwrap();
+                let reader = BufReader::new(file);
+                let mut wordcount: HashMap<String, u32> = HashMap::new();
+
+                for line in reader.lines().filter_map(Result::ok) {
+                    for word in line.split_ascii_whitespace() {
+                        *wordcount.entry(String::from(word)).or_insert(0) += 1;
+                    }
+                }
+
+                let _ = respond_to.send(wordcount);
             }
         }
     }
@@ -72,6 +94,15 @@ impl HandleMapper {
     }
     pub async fn load_file(&self, filename: PathBuf) -> String {
         let (send, recv) = oneshot::channel();
+        let message = MapperMessage::ProcessFileTest {
+            filename,
+            respond_to: send,
+        };
+        let _ = self.sender.send(message).await;
+        recv.await.expect("Actor ded")
+    }
+    pub async fn process_file(&self, filename: PathBuf) -> HashMap<String, u32> {
+        let (send, recv) = oneshot::channel();
         let message = MapperMessage::ProcessFile {
             filename,
             respond_to: send,
@@ -99,5 +130,16 @@ mod tests {
         let mapper = HandleMapper::new();
         let res = mapper.load_file(PathBuf::from("./test.txt")).await;
         assert_eq!("Hello World!\n", &res);
+    }
+
+    #[tokio::test]
+    async fn test_mapper_process_file() {
+        let mapper = HandleMapper::new();
+        let res = mapper.process_file(PathBuf::from("./test.txt")).await;
+        let map: HashMap<String, u32> =
+            HashMap::from([(String::from("Hello"), 1), (String::from("World!"), 1)]);
+        print!("{:?}", res);
+        assert_eq!(&res.len(), &map.len());
+        assert!(&res.keys().all(|key| map.contains_key(key)))
     }
 }
