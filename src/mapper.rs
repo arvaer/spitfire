@@ -57,7 +57,7 @@ impl Mapper {
 
                 for line in reader.lines().filter_map(Result::ok) {
                     for word in line.split_ascii_whitespace() {
-                        *wordcount.entry(String::from(word)).or_insert(0) += 1;
+                        *wordcount.entry(String::from(word).to_lowercase()).or_insert(0) += 1;
                     }
                 }
 
@@ -138,7 +138,6 @@ mod tests {
         let res = mapper.process_file(PathBuf::from("./test.txt")).await;
         let map: HashMap<String, u32> =
             HashMap::from([(String::from("Hello"), 1), (String::from("World!"), 1)]);
-        print!("{:?}", res);
         assert_eq!(&res.len(), &map.len());
         assert!(&res.keys().all(|key| map.contains_key(key)))
     }

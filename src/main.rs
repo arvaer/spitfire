@@ -1,4 +1,5 @@
-use tokio::sync::mpsc;
+use std::collections::HashMap;
+
 mod mapper;
 
 #[tokio::main]
@@ -11,27 +12,19 @@ async fn main() -> std::io::Result<()> {
         .collect::<Vec<_>>();
     println!("files: {:?}", files);
 
-    let (tx, mut rx) = mpsc::channel(100);
 
-    tokio::spawn(async move {
-        for i in files {
-            if let Err(_) = tx.send(i).await {
-                println!("receiver dropped");
-                return;
-            }
-        }
-    });
 
-    while let Some(i) = rx.recv().await {
-        println!("got = {:?}", i);
+    for file in files{
+        let handle = mapper::HandleMapper::new();
+        println!("{}", file.display());
+        let wcs: HashMap<String, u32> = handle.process_file(file).await;
+        println!("{:?}", wcs);
+
     }
 
-    let handle = mapper::HandleMapper::new();
-    let message_id = mapper::HandleMapper::get_unique_id(&handle).await;
-    println!("message_id: {:?}", message_id);
 
-    let next_message_id = mapper::HandleMapper::get_unique_id(&handle).await;
-    println!("message_id: {:?}", next_message_id);
+
 
     Ok(())
+
 }
