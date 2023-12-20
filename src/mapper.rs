@@ -137,7 +137,7 @@ mod tests {
         let mapper = HandleMapper::new();
         let res = mapper.process_file(PathBuf::from("./test.txt")).await;
         let map: HashMap<String, u32> =
-            HashMap::from([(String::from("Hello"), 1), (String::from("World!"), 1)]);
+            HashMap::from([(String::from("hello"), 1), (String::from("world!"), 1)]);
         assert_eq!(&res.len(), &map.len());
         assert!(&res.keys().all(|key| map.contains_key(key)))
     }
