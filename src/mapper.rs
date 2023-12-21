@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::collections::BTreeMap;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -61,7 +62,8 @@ impl Mapper {
                     }
                 }
 
-                let _ = respond_to.send(wordcount);
+                let sorted_wordcount: IndexMap<String, u32> = wordcount.into_iter().collect::<BTreeMap<_, _>>().into_iter().collect();
+                let _ = respond_to.send(sorted_wordcount);
             }
         }
     }
