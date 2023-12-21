@@ -1,9 +1,9 @@
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
+use indexmap::IndexMap;
 
 pub struct Mapper {
     receiver: mpsc::Receiver<MapperMessage>,
@@ -20,7 +20,7 @@ pub enum MapperMessage {
     },
     ProcessFile {
         filename: PathBuf,
-        respond_to: oneshot::Sender<HashMap<String, u32>>,
+        respond_to: oneshot::Sender<IndexMap<String, u32>>,
     },
 }
 
@@ -53,7 +53,7 @@ impl Mapper {
             } => {
                 let file = File::open(&filename).unwrap();
                 let reader = BufReader::new(file);
-                let mut wordcount: HashMap<String, u32> = HashMap::new();
+                let mut wordcount: IndexMap<String, u32> = IndexMap::new();
 
                 for line in reader.lines().filter_map(Result::ok) {
                     for word in line.split_ascii_whitespace() {
@@ -101,7 +101,7 @@ impl HandleMapper {
         let _ = self.sender.send(message).await;
         recv.await.expect("Actor ded")
     }
-    pub async fn process_file(&self, filename: PathBuf) -> HashMap<String, u32> {
+    pub async fn process_file(&self, filename: PathBuf) -> IndexMap<String, u32> {
         let (send, recv) = oneshot::channel();
         let message = MapperMessage::ProcessFile {
             filename,
@@ -136,8 +136,8 @@ mod tests {
     async fn test_mapper_process_file() {
         let mapper = HandleMapper::new();
         let res = mapper.process_file(PathBuf::from("./test.txt")).await;
-        let map: HashMap<String, u32> =
-            HashMap::from([(String::from("hello"), 1), (String::from("world!"), 1)]);
+        let map: IndexMap<String, u32> =
+            IndexMap::from([(String::from("hello"), 1), (String::from("world!"), 1)]);
         assert_eq!(&res.len(), &map.len());
         assert!(&res.keys().all(|key| map.contains_key(key)))
     }

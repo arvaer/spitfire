@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use indexmap::IndexMap;
 
 mod mapper;
 
@@ -17,7 +17,7 @@ async fn main() -> std::io::Result<()> {
     for file in files{
         let handle = mapper::HandleMapper::new();
         println!("{}", file.display());
-        let wcs: HashMap<String, u32> = handle.process_file(file).await;
+        let wcs: IndexMap<String, u32> = handle.process_file(file).await;
         println!("{:?}", wcs);
 
     }
