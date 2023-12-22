@@ -4,11 +4,11 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
-use indexmap::IndexMap;
 
 pub struct Mapper {
     receiver: mpsc::Receiver<MapperMessage>,
     message_id: usize,
+    internal_buffer: Vec<BTreeMap<String, u32>>,
 }
 
 pub enum MapperMessage {
@@ -19,9 +19,13 @@ pub enum MapperMessage {
         filename: PathBuf,
         respond_to: oneshot::Sender<String>,
     },
-    ProcessFile {
+    ProcessSingleFile {
         filename: PathBuf,
-        respond_to: oneshot::Sender<IndexMap<String, u32>>,
+        respond_to: oneshot::Sender<BTreeMap<String, u32>>,
+    },
+    ProcessFiles {
+        filename: PathBuf,
+        respond_to: oneshot::Sender<String>,
     },
 }
 
@@ -30,6 +34,7 @@ impl Mapper {
         Mapper {
             receiver,
             message_id: 0,
+            internal_buffer: Vec::new(),
         }
     }
 
@@ -48,13 +53,13 @@ impl Mapper {
                 file.read_to_string(&mut contents).unwrap();
                 let _ = respond_to.send(contents);
             }
-            MapperMessage::ProcessFile {
+            MapperMessage::ProcessSingleFile {
                 filename,
                 respond_to,
             } => {
                 let file = File::open(&filename).unwrap();
                 let reader = BufReader::new(file);
-                let mut wordcount: IndexMap<String, u32> = IndexMap::new();
+                let mut wordcount: BTreeMap<String, u32> = BTreeMap::new();
 
                 for line in reader.lines().filter_map(Result::ok) {
                     for word in line.split_ascii_whitespace() {
@@ -62,11 +67,37 @@ impl Mapper {
                     }
                 }
 
-                let sorted_wordcount: IndexMap<String, u32> = wordcount.into_iter().collect::<BTreeMap<_, _>>().into_iter().collect();
-                let _ = respond_to.send(sorted_wordcount);
+                let _ = respond_to.send(wordcount);
+            },
+            MapperMessage::ProcessFiles {
+                filename,
+                respond_to,
+            } => {
+                self.message_id += 1;
+                let file = File::open(&filename).unwrap();
+                let reader = BufReader::new(file);
+                let mut wordcount: BTreeMap<String, u32> = BTreeMap::new();
+
+                for line in reader.lines().filter_map(Result::ok) {
+                    for word in line.split_ascii_whitespace() {
+                        *wordcount.entry(String::from(word).to_lowercase()).or_insert(0) += 1;
+                    }
+                }
+
+                self.internal_buffer.push(wordcount);
+                if self.message_id % 5 == 0 {
+                    drain_internal_buffer(self);
+                }
+                let _ = respond_to.send(String::from(filename.to_str().unwrap()));
             }
+
+
         }
     }
+}
+
+fn drain_internal_buffer(mapper:&mut Mapper){
+    todo!();
 }
 
 pub async fn run_mapper(mut mapper: Mapper) {
@@ -103,9 +134,18 @@ impl HandleMapper {
         let _ = self.sender.send(message).await;
         recv.await.expect("Actor ded")
     }
-    pub async fn process_file(&self, filename: PathBuf) -> IndexMap<String, u32> {
+    pub async fn process_file(&self, filename: PathBuf) -> BTreeMap<String, u32> {
         let (send, recv) = oneshot::channel();
-        let message = MapperMessage::ProcessFile {
+        let message = MapperMessage::ProcessSingleFile {
+            filename,
+            respond_to: send,
+        };
+        let _ = self.sender.send(message).await;
+        recv.await.expect("Actor ded")
+    }
+    pub async fn process_files(&self, filename: PathBuf) -> String {
+        let (send, recv) = oneshot::channel();
+        let message = MapperMessage::ProcessFiles {
             filename,
             respond_to: send,
         };
@@ -138,8 +178,8 @@ mod tests {
     async fn test_mapper_process_file() {
         let mapper = HandleMapper::new();
         let res = mapper.process_file(PathBuf::from("./test.txt")).await;
-        let map: IndexMap<String, u32> =
-            IndexMap::from([(String::from("hello"), 1), (String::from("world!"), 1)]);
+        let map: BTreeMap<String, u32> =
+            BTreeMap::from([(String::from("hello"), 1), (String::from("world!"), 1)]);
         assert_eq!(&res.len(), &map.len());
         assert!(&res.keys().all(|key| map.contains_key(key)))
     }

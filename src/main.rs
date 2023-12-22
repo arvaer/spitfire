@@ -1,4 +1,4 @@
-use indexmap::IndexMap;
+use std::collections::BTreeMap;
 
 mod mapper;
 
@@ -12,19 +12,27 @@ async fn main() -> std::io::Result<()> {
         .collect::<Vec<_>>();
     println!("files: {:?}", files);
 
+    let mut thread_handles = Vec::with_capacity(files.len());
 
-
-    for file in files{
-        let handle = mapper::HandleMapper::new();
-        println!("{}", file.display());
-        let wcs: IndexMap<String, u32> = handle.process_file(file).await;
-        println!("{:?}", wcs);
-
+    for file in files {
+        let file_clone = file.clone();
+        let thread_handle = tokio::task::spawn(async move {
+            let mapper_handle = mapper::HandleMapper::new();
+            let wcs: BTreeMap<String, u32> = mapper_handle.process_file(file_clone).await;
+            return wcs;
+        });
+        thread_handles.push(thread_handle);
     }
 
-
-
+    let results = futures::future::join_all(thread_handles).await;
+    for result in results {
+        match result {
+            Ok(wcs) => {
+                println!("{:?}", wcs);
+            }
+            Err(_) => panic!("aw shiet"),
+        }
+    }
 
     Ok(())
-
 }
