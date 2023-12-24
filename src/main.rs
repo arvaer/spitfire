@@ -1,4 +1,5 @@
 mod mapper;
+mod reducer;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {

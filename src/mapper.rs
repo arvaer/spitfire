@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
