@@ -117,6 +117,7 @@ impl Mapper {
 }
 
 fn drain_internal_buffer(mapper: &mut Mapper) {
+    print!("Draining internal buffer");
     for buffer in mapper.internal_buffer.iter() {
         let mut target_partition = 5; //default partition
         for (key, value) in buffer.iter() {

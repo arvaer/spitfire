@@ -1,40 +1,75 @@
 mod mapper;
 mod reducer;
+use std::future::IntoFuture;
+
+use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let arg = args.get(1).expect("no argument given");
     let directory = std::path::Path::new(arg);
-    let files = std::fs::read_dir(directory)?
+    let mut files = std::fs::read_dir(directory)?
         .map(|res| res.unwrap().path())
         .collect::<Vec<_>>();
     println!("files: {:?}", files);
 
-    let mut thread_handles = Vec::with_capacity(files.len());
+    let mut unoccupied_mappers: HashMap<usize, mapper::HandleMapper> = HashMap::with_capacity(24);
+    let mut occupied_mappers: HashMap<usize, mapper::HandleMapper> = HashMap::with_capacity(24);
 
-    for file in files {
-        let file_clone = file.clone();
-        let thread_handle: tokio::task::JoinHandle<(mapper::HandleMapper, String)> = tokio::task::spawn(async move {
-            let mapper_handle = mapper::HandleMapper::new();
-           // let wcs: BTreeMap<String, u32> = mapper_handle.process_file(file_clone).await;
-            //return wcs;
-            let processed_file_name = mapper_handle.process_file_with_buffer(file_clone).await;
-            return (mapper_handle, processed_file_name);
-        });
-        thread_handles.push(thread_handle);
+    for id in 0..24 {
+        unoccupied_mappers.insert(id, mapper::HandleMapper::new());
     }
 
-
-    let results = futures::future::join_all(thread_handles).await;
-    for result in results {
-        match result {
-            Ok((handle, file)) => {
-                handle.cleanup_signal().await;
-                println!("{:?}", file);
-            }
-            Err(_) => panic!("aw shiet"),
+    //i will keep two seperate queues, an occupied queue and an unoccupied queue.
+    //in the main loop of the program, i will constantly assign files to be processed
+    //from mappers in the unoccupied queue.
+    let mut counter = 0;
+    loop {
+        println!("counter: {}", counter);
+        let mut tasks = Vec::new();
+        if files.is_empty() {
+            break;
         }
+        while let Some((id, mapper)) = unoccupied_mappers
+            .iter()
+            .next()
+            .map(|(id, mapper)| (*id, mapper.clone()))
+        {
+            unoccupied_mappers.remove(&id);
+
+            if let Some(file) = files.pop() {
+                occupied_mappers.insert(id, mapper.clone());
+                let handle = tokio::spawn(async move {
+                    mapper.process_file_with_buffer(file).await;
+                    id
+                });
+                tasks.push(handle);
+            } else {
+                break;
+            }
+        }
+        for task in tasks.iter_mut() {
+            let id = task.into_future().await;
+            match &id {
+                Ok(id) => {
+                    if let Some(free_worker) = occupied_mappers.remove(&id) {
+                        unoccupied_mappers.insert(*id, free_worker);
+                    }
+                }
+                Err(e)  => {
+                    eprintln!("Task failed with error :{}", e)
+                }
+            };
+        }
+        if files.is_empty() && tasks.is_empty() {
+            for (_, mapper) in unoccupied_mappers.iter() {
+                mapper.cleanup_signal().await;
+            }
+            break;
+        }
+
+        counter += 1;
     }
 
     Ok(())
