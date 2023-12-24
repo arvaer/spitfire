@@ -128,7 +128,7 @@ fn drain_internal_buffer(mapper: &mut Mapper) {
                     }
                 }
             }
-            let file_name = format!("./tmp/{}", target_partition);
+            let file_name = format!("./tmp/{}.txt", target_partition);
             let content = format!("{}:{}", key, value);
 
             let mut file = OpenOptions::new()

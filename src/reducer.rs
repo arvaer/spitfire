@@ -7,6 +7,9 @@ pub struct Reducer {
 
 pub enum ReducerMessage {
     GetId { respond_to: oneshot::Sender<usize> },
+    Shuffle { respond_to : oneshot::Sender<String>, parition_name: String},
+    Reduce { respond_to : oneshot::Sender<String>, parition_name: String},
+
 }
 
 impl Reducer {
@@ -22,6 +25,12 @@ impl Reducer {
             ReducerMessage::GetId { respond_to } => {
                 self.message_id += 1;
                 let _ = respond_to.send(self.message_id);
+            }
+            ReducerMessage:: Shuffle { respond_to, parition_name } => {
+                //this is going to go through each of the buffered file partitions and do a stable sort
+            }
+            ReducerMessage:: Reduce { respond_to, parition_name} => {
+                // this is going to consume each partition and return the counts of the words
             }
         }
     }
