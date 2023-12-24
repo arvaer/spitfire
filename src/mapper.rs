@@ -5,12 +5,12 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::path::Path;
 use std::path::PathBuf;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex};
 mod helpers;
 
 pub struct Mapper {
     receiver: mpsc::Receiver<MapperMessage>,
-    message_id: usize,
+    message_id: Mutex<usize>,
     internal_buffer: Vec<BTreeMap<String, u32>>,
 }
 
@@ -39,16 +39,18 @@ impl Mapper {
     fn new(receiver: mpsc::Receiver<MapperMessage>) -> Self {
         Mapper {
             receiver,
-            message_id: 0,
+            message_id: Mutex::new(0),
             internal_buffer: Vec::new(),
         }
     }
 
-    fn handle_message(&mut self, msg: MapperMessage) {
+    async fn handle_message(&mut self, msg: MapperMessage) {
         match msg {
             MapperMessage::GetId { respond_to } => {
-                self.message_id += 1;
-                let _ = respond_to.send(self.message_id);
+                let mut guard =  self.message_id.lock().await;
+                *guard += 1;
+                let _ = respond_to.send(*guard);
+                drop(guard);
             }
             MapperMessage::Cleanup { respond_to } => {
                 drain_internal_buffer(self);
@@ -85,7 +87,15 @@ impl Mapper {
                 filename,
                 respond_to,
             } => {
-                self.message_id += 1;
+                let mut guard = self.message_id.lock().await;
+                *guard += 1;
+
+                if *guard % 10 == 0 {
+                    drop(guard);
+                    drain_internal_buffer(self);
+                }
+
+
                 let file = File::open(&filename).unwrap();
                 let reader = BufReader::new(file);
                 let mut wordcount: BTreeMap<String, u32> = BTreeMap::new();
@@ -99,9 +109,6 @@ impl Mapper {
                 }
 
                 self.internal_buffer.push(wordcount);
-                if self.message_id % 10 == 0 {
-                    drain_internal_buffer(self);
-                }
                 let _ = respond_to.send(String::from(filename.to_str().unwrap()));
             },
 
@@ -137,7 +144,7 @@ fn drain_internal_buffer(mapper: &mut Mapper) {
 
 pub async fn run_mapper(mut mapper: Mapper) {
     while let Some(msg) = mapper.receiver.recv().await {
-        mapper.handle_message(msg);
+        mapper.handle_message(msg).await;
     }
 }
 
