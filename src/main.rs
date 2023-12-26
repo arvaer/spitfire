@@ -1,6 +1,8 @@
+#![allow(dead_code)]
 mod mapper;
 mod reducer;
 use std::future::IntoFuture;
+
 
 use std::collections::HashMap;
 
@@ -14,10 +16,10 @@ async fn main() -> std::io::Result<()> {
         .collect::<Vec<_>>();
     println!("files: {:?}", files);
 
-    let mut unoccupied_mappers: HashMap<usize, mapper::HandleMapper> = HashMap::with_capacity(24);
-    let mut occupied_mappers: HashMap<usize, mapper::HandleMapper> = HashMap::with_capacity(24);
+    let mut unoccupied_mappers: HashMap<usize, mapper::HandleMapper> = HashMap::with_capacity(num_cpus::get());
+    let mut occupied_mappers: HashMap<usize, mapper::HandleMapper> = HashMap::with_capacity(num_cpus::get());
 
-    for id in 0..24 {
+    for id in 0..num_cpus::get() {
         unoccupied_mappers.insert(id, mapper::HandleMapper::new());
     }
 
