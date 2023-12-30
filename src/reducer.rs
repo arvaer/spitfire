@@ -7,8 +7,8 @@ pub struct Reducer {
 
 pub enum ReducerMessage {
     GetId { respond_to: oneshot::Sender<usize> },
-    Shuffle { respond_to : oneshot::Sender<String>, parition_name: String},
-    Reduce { respond_to : oneshot::Sender<String>, parition_name: String},
+    Shuffle { respond_to : oneshot::Sender<String>, partition_name: String},
+    Reduce { respond_to : oneshot::Sender<String>, partition_name: String},
 
 }
 
@@ -26,10 +26,10 @@ impl Reducer {
                 self.message_id += 1;
                 let _ = respond_to.send(self.message_id);
             }
-            ReducerMessage:: Shuffle { respond_to, parition_name } => {
+            ReducerMessage:: Shuffle { respond_to, partition_name } => {
                 //this is going to go through each of the buffered file partitions and do a stable sort
             }
-            ReducerMessage:: Reduce { respond_to, parition_name} => {
+            ReducerMessage:: Reduce { respond_to, partition_name} => {
                 // this is going to consume each partition and return the counts of the words
             }
         }
@@ -48,7 +48,7 @@ pub struct HandleReducer {
 }
 
 impl HandleReducer {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let (sender, receiver) = mpsc::channel(8);
         let reducer: Reducer = Reducer::new(receiver);
         tokio::spawn(run_reducer(reducer));
@@ -62,6 +62,15 @@ impl HandleReducer {
         let _ = self.sender.send(message).await;
         recv.await.expect("Reduce Actor died")
     }
+     pub async fn shuffle(self, partition_name: String) {
+        let (send, recv) = oneshot::channel();
+        let message = ReducerMessage::Shuffle {
+            respond_to: send,
+            partition_name
+        };
+        let _ = self.sender.send(message).await;
+        recv.await.expect("Reduce ExternalSort Dead");
+     }
 }
 
 #[cfg(test)]
@@ -74,4 +83,5 @@ mod tests {
         let id = reducer.get_unique_id().await;
         assert_eq!(id, 1);
     }
+
 }

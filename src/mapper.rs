@@ -1,8 +1,10 @@
+use file_lock::*;
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::BufReader;
+use std::ops::DerefMut;
 use std::path::Path;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot, Mutex};
@@ -11,7 +13,7 @@ mod helpers;
 pub struct Mapper {
     receiver: mpsc::Receiver<MapperMessage>,
     message_id: Mutex<usize>,
-    internal_buffer: Vec<BTreeMap<String, u32>>,
+    internal_buffer: Mutex<Vec<BTreeMap<String, u32>>>,
 }
 
 pub enum MapperMessage {
@@ -31,7 +33,7 @@ pub enum MapperMessage {
     },
     ProcessFileWithBuffer {
         filename: PathBuf,
-        respond_to: oneshot::Sender<String>,
+        respond_to: oneshot::Sender<usize>,
     },
 }
 
@@ -40,20 +42,20 @@ impl Mapper {
         Mapper {
             receiver,
             message_id: Mutex::new(0),
-            internal_buffer: Vec::new(),
+            internal_buffer: Mutex::new(Vec::new()),
         }
     }
 
     async fn handle_message(&mut self, msg: MapperMessage) {
         match msg {
             MapperMessage::GetId { respond_to } => {
-                let mut guard =  self.message_id.lock().await;
+                let mut guard = self.message_id.lock().await;
                 *guard += 1;
                 let _ = respond_to.send(*guard);
                 drop(guard);
             }
             MapperMessage::Cleanup { respond_to } => {
-                drain_internal_buffer(self);
+                drain_internal_buffer(self).await;
                 let _ = respond_to.send(String::from("Cleanup Finished"));
             }
             MapperMessage::ProcessFileTest {
@@ -89,13 +91,11 @@ impl Mapper {
             } => {
                 let mut guard = self.message_id.lock().await;
                 *guard += 1;
-
+                let message_id = guard.clone();
                 if *guard % 10 == 0 {
                     drop(guard);
-                    drain_internal_buffer(self);
+                    drain_internal_buffer(self).await;
                 }
-
-
                 let file = File::open(&filename).unwrap();
                 let reader = BufReader::new(file);
                 let mut wordcount: BTreeMap<String, u32> = BTreeMap::new();
@@ -108,17 +108,21 @@ impl Mapper {
                     }
                 }
 
-                self.internal_buffer.push(wordcount);
-                let _ = respond_to.send(String::from(filename.to_str().unwrap()));
-            },
+                let mut guard = self.internal_buffer.lock().await;
+                guard.push(wordcount);
+                drop(guard);
 
+                let _ = respond_to.send(message_id);
+            }
         }
     }
 }
 
-fn drain_internal_buffer(mapper: &mut Mapper) {
-    print!("Draining internal buffer");
-    for buffer in mapper.internal_buffer.iter() {
+async fn drain_internal_buffer(mapper: &mut Mapper) {
+    let mut guard = Mutex::lock(&mapper.internal_buffer).await;
+    println!("Lock aquired in drain buffer");
+    let internal_buffer = guard.deref_mut();
+    for buffer in internal_buffer.iter() {
         let mut target_partition = 5; //default partition
         for (key, value) in buffer.iter() {
             if let Some(first_letter) = key.chars().next() {
@@ -131,16 +135,25 @@ fn drain_internal_buffer(mapper: &mut Mapper) {
             }
             let file_name = format!("./tmp/{}.txt", target_partition);
             let content = format!("{}:{}", key, value);
+            let should_we_block = true;
+            let options = FileOptions::new().create(true).append(true);
 
-            let mut file = OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(Path::new(&file_name))
-                .expect("Failed to open or create");
+            println!("Locking file: {}", file_name);
+            let mut filelock = match FileLock::lock(&file_name, should_we_block, options) {
+                Ok(lock) => lock,
+                Err(err) => panic!("Error getting lock: {}", err),
+            };
+            println!("...locked\n");
 
-            writeln!(file, "{}", content).expect("Failed to write");
+            writeln!(filelock.file, "{}", content).expect("Error writing to file");
+            filelock.unlock().unwrap();
+            println!("Unlocked file: {}", file_name);
         }
     }
+    internal_buffer.clear();
+    drop(guard);
+
+    println!("Drained internal buffer");
 }
 
 pub async fn run_mapper(mut mapper: Mapper) {
@@ -186,7 +199,7 @@ impl HandleMapper {
         let _ = self.sender.send(message).await;
         recv.await.expect("Actor ded")
     }
-    pub async fn process_file_with_buffer(&self, filename: PathBuf) -> String {
+    pub async fn process_file_with_buffer(&self, filename: PathBuf) -> usize {
         let (send, recv) = oneshot::channel();
         let message = MapperMessage::ProcessFileWithBuffer {
             filename,
@@ -197,9 +210,7 @@ impl HandleMapper {
     }
     pub async fn cleanup_signal(&self) -> String {
         let (send, recv) = oneshot::channel();
-        let message = MapperMessage::Cleanup {
-            respond_to: send
-        };
+        let message = MapperMessage::Cleanup { respond_to: send };
         let _ = self.sender.send(message).await;
         recv.await.expect("Cleanup actor ded")
     }
@@ -238,7 +249,9 @@ mod tests {
     #[tokio::test]
     async fn test_mapper_process_files() {
         let mapper = HandleMapper::new();
-        let res = mapper.process_file_with_buffer(PathBuf::from("./test.txt")).await;
-        assert!(res.contains("test.txt"));
+        let res = mapper
+            .process_file_with_buffer(PathBuf::from("./test.txt"))
+            .await;
+        assert_eq!(res, 1);
     }
 }
