@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 mod mapper;
 mod reducer;
+mod writer;
 use std::future::IntoFuture;
 
 use std::collections::HashMap;
