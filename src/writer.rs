@@ -1,62 +1,91 @@
-use tokio::{sync::{ mpsc::{self, channel}, oneshot, Mutex}, task::spawn_blocking, io::BufWriter, fs::File};
 use std::{collections::HashMap, path::PathBuf};
+use tokio::{
+    fs::File,
+    io::BufWriter,
+    sync::{
+        mpsc::{self, channel},
+        oneshot, Mutex,
+    },
+    task::spawn_blocking,
+};
 
 struct Writer {
     message_id: Mutex<usize>,
     receiver: mpsc::Receiver<WriterMessage>,
-    bufwriter: HashMap<PathBuf,Mutex<BufWriter<File>>>
+    bufwriter: HashMap<PathBuf, Mutex<BufWriter<File>>>,
 }
 impl Writer {
-    fn new(receiver:mpsc::Receiver<WriterMessage>) -> Self {
+    fn new(receiver: mpsc::Receiver<WriterMessage>) -> Self {
         Self {
             message_id: Mutex::new(0),
             receiver,
-            bufwriter: HashMap::new()
+            bufwriter: HashMap::new(),
         }
     }
-    async fn handle_message(&mut self, message: WriterMessage){
+    async fn handle_message(&mut self, message: WriterMessage) {
         match message {
-            WriterMessage::BeginWriting { respond_to, filename: PathBuf } => {
+            WriterMessage::BeginWriting {
+                filename,
+                respond_to,
+            } => {
                 let mut guard = self.message_id.lock().await;
                 *guard += 1;
                 drop(guard);
 
-                if let Some(writer) = self.bufwriter.remove(&filename) {
-                     let _ = respond_to.send(String::from("found writer. Ready to begin"));
-                }
-                else {
-                    self.bufwriter.insert(filename, Mutex::new(BufWriter::new(&filename)));
-                    let _ = respond_to.send(String::from("created new writer. Ready to begin"));
-                }
+                self.bufwriter.entry(filename.clone()).or_insert({
+                    let file = File::options()
+                        .append(true)
+                        .create(true)
+                        .open(&filename)
+                        .await
+                        .unwrap();
+                    Mutex::new(BufWriter::new(file))
+                });
 
+                let response = Packet {
+                    header: String::from("Begin Writing"),
+                    body: String::from("BeginWriting Finished"),
+                    status: 200,
+                };
 
+                let _ = respond_to.send(response);
+            }
 
-
+            WriterMessage::Write {
+                message,
+                respond_to,
+            } => {
+                todo!();
             }
             _ => {}
-
         }
     }
 }
 
+struct Packet {
+    header: String,
+    body: String,
+    status: usize,
+}
+
 enum WriterMessage {
     BeginWriting {
-        respond_to: oneshot::Sender<String>,
-        filename: PathBuf
+        filename: PathBuf,
+        respond_to: oneshot::Sender<Packet>,
     },
     Write {
-        message: String,
-        respond_to: mpsc::Sender<String>
+        message: Packet,
+        respond_to: mpsc::Sender<Packet>,
     },
     EndWriting {
-        respond_to: oneshot::Sender<String>
-    }
+        respond_to: oneshot::Sender<String>,
+    },
 }
 
 struct WriterHandle {
-    sender: mpsc::Sender<WriterMessage>
+    sender: mpsc::Sender<WriterMessage>,
 }
-async fn run_writer(mut writer:  Writer) {
+async fn run_writer(mut writer: Writer) {
     while let Some(message) = writer.receiver.recv().await {
         writer.handle_message(message).await;
     }
@@ -68,19 +97,27 @@ impl WriterHandle {
         let writer = Writer::new(receiver);
         tokio::spawn(run_writer(writer));
 
-        return Self{
-            sender
-        };
+        return Self { sender };
     }
 
-    pub async fn begin_writing(&mut self) -> String {
+    pub async fn begin_writing(&mut self, filename: PathBuf) -> Packet {
         let (sender, receiver) = oneshot::channel();
         let message = WriterMessage::BeginWriting {
-            respond_to: sender
+            respond_to: sender,
+            filename,
         };
         let _ = self.sender.send(message).await.unwrap();
         receiver.await.unwrap()
     }
+}
 
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_be
 }
 
