@@ -43,8 +43,8 @@ impl Writer {
                 });
 
                 let response = Packet {
-                    header: String::from("Begin Writing"),
-                    body: String::from("BeginWriting Finished"),
+                    header: PacketHeader::Ready,
+                    body: Some(String::from("BeginWriting Finished")),
                     status: 200,
                 };
 
@@ -63,9 +63,16 @@ impl Writer {
 }
 
 struct Packet {
-    header: String,
-    body: String,
+    header: PacketHeader,
+    body: Option<String>,
     status: usize,
+}
+
+enum PacketHeader {
+    Ready,
+    Newline,
+    Done,
+    Error
 }
 
 enum WriterMessage {
@@ -78,7 +85,7 @@ enum WriterMessage {
         respond_to: mpsc::Sender<Packet>,
     },
     EndWriting {
-        respond_to: oneshot::Sender<String>,
+        respond_to: oneshot::Sender<Packet>,
     },
 }
 
@@ -92,7 +99,7 @@ async fn run_writer(mut writer: Writer) {
 }
 
 impl WriterHandle {
-    pub async fn new(&mut self) -> Self {
+    pub async fn new() -> Self {
         let (sender, receiver) = channel(100);
         let writer = Writer::new(receiver);
         tokio::spawn(run_writer(writer));
@@ -118,6 +125,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_be
+    async fn test_begin_writing() {
+        let mut writer = WriterHandle::new().await;
+        let packet = writer.begin_writing(PathBuf::from("test.txt")).await;
+        assert_eq!(packet.status, 200);
+    }
 }
 
