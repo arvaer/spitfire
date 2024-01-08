@@ -2,9 +2,9 @@
 mod mapper;
 mod reducer;
 mod writer;
-use std::future::IntoFuture;
 
 use std::collections::HashMap;
+use std::future::IntoFuture;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -17,13 +17,15 @@ async fn main() -> std::io::Result<()> {
         .collect::<Vec<_>>();
     println!("files: {:?}", files);
 
+    let writer_handle = writer::WriterHandle::new().await;
+
     let mut unoccupied_mappers: HashMap<usize, mapper::HandleMapper> =
         HashMap::with_capacity(num_cpus::get());
     let mut occupied_mappers: HashMap<usize, mapper::HandleMapper> =
         HashMap::with_capacity(num_cpus::get());
 
     for id in 0..num_cpus::get() {
-        unoccupied_mappers.insert(id, mapper::HandleMapper::new());
+        unoccupied_mappers.insert(id, mapper::HandleMapper::new(writer_handle.clone()));
     }
 
     //i will keep two seperate queues, an occupied queue and an unoccupied queue.

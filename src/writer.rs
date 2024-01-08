@@ -10,19 +10,19 @@ use tokio::{
 
 #[derive(Debug)]
 pub struct Request {
-    header: RequestHeader,
-    body: String,
+    pub header: RequestHeader,
+    pub body: Option<String>,
 }
 
 #[derive(Debug)]
 pub struct Response {
     header: ResponseHeader,
     body: Option<String>,
-    status: usize,
+    pub status: usize,
 }
 
 #[derive(Debug)]
-enum RequestHeader {
+pub enum RequestHeader {
     Prepare,
     Payload { key: PathBuf },
     Cleanup,
@@ -113,10 +113,10 @@ impl Writer {
                         if let Some(writer) = self.bufwriter.get(&key) {
                             let mut guard = writer.lock().await;
                             guard
-                                .write(message.body.as_bytes())
+                                .write(message.body.unwrap().as_bytes())
                                 .await
                                 .expect("issue writing to file");
-                            //print info about guard
+
                             guard.flush().await.expect("issue flushing file");
                             drop(guard);
                             let _ = respond_to.send(Response {
@@ -153,7 +153,8 @@ impl Writer {
     }
 }
 
-struct WriterHandle {
+#[derive(Clone)]
+pub struct WriterHandle {
     sender: mpsc::Sender<WriterMessage>,
 }
 async fn run_writer(mut writer: Writer) {
@@ -183,11 +184,11 @@ impl WriterHandle {
 
     pub async fn write_message(&mut self, message: Request) -> Response {
         let (send, recv) = oneshot::channel();
+        println!("Sending message: {:?}", message.body);
         let message = WriterMessage::Write {
             respond_to: send,
             message,
         };
-        println!("Sending message: {:?}", message);
 
         let _ = self.sender.send(message).await;
 
@@ -215,7 +216,7 @@ mod tests {
 
         let first_message = Request {
             header: RequestHeader::Prepare,
-            body: String::from("We're starting now"),
+            body: Some(String::from("We're starting now")),
         };
         let first = writer.write_message(first_message).await;
         println!("{:?}", first);
@@ -225,7 +226,7 @@ mod tests {
             header: RequestHeader::Payload {
                 key: PathBuf::from("test2.txt"),
             },
-            body: String::from("A new dog is here!"),
+            body: Some(String::from("A new dog is here!")),
         };
         let second = writer.write_message(message_second).await;
         println!("{:?}", second);
@@ -233,7 +234,7 @@ mod tests {
 
         let message_third = Request {
             header: RequestHeader::Cleanup,
-            body: String::from("No more data!"),
+            body: Some(String::from("No more data!")),
         };
 
         let third = writer.write_message(message_third).await;

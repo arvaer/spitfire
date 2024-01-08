@@ -5,13 +5,18 @@ use std::io::prelude::*;
 use std::io::BufReader;
 use std::ops::DerefMut;
 use std::path::PathBuf;
+use std::str::FromStr;
 use tokio::sync::{mpsc, oneshot, Mutex};
 mod helpers;
+use crate::writer;
+use crate::writer::Request;
+use crate::writer::WriterHandle;
 
 pub struct Mapper {
     receiver: mpsc::Receiver<MapperMessage>,
     message_id: Mutex<usize>,
     internal_buffer: Mutex<Vec<BTreeMap<String, u32>>>,
+    writer_handle: writer::WriterHandle,
 }
 
 pub enum MapperMessage {
@@ -36,11 +41,12 @@ pub enum MapperMessage {
 }
 
 impl Mapper {
-    fn new(receiver: mpsc::Receiver<MapperMessage>) -> Self {
+    fn new(receiver: mpsc::Receiver<MapperMessage>, writer: writer::WriterHandle) -> Self {
         Mapper {
             receiver,
             message_id: Mutex::new(0),
             internal_buffer: Mutex::new(Vec::new()),
+            writer_handle: writer,
         }
     }
 
@@ -132,20 +138,22 @@ async fn drain_internal_buffer(mapper: &mut Mapper) {
                 }
             }
             let file_name = format!("./tmp/{}.txt", target_partition);
-            let content = format!("{}:{}", key, value);
-            let should_we_block = true;
-            let options = FileOptions::new().create(true).append(true);
+            let content = format!("{}:{}\n", key, value);
 
-            println!("Locking file: {}", file_name);
-            let mut filelock = match FileLock::lock(&file_name, should_we_block, options) {
-                Ok(lock) => lock,
-                Err(err) => panic!("Error getting lock: {}", err),
+
+            let zero = mapper.writer_handle.begin_writing(PathBuf::from(&file_name)).await;
+            assert_eq!(zero.status, 200);
+
+
+            let message = Request {
+                header: writer::RequestHeader::Payload {
+                    key: PathBuf::from_str(&file_name).unwrap(),
+                },
+                body: Some(content),
             };
-            println!("...locked\n");
 
-            writeln!(filelock.file, "{}", content).expect("Error writing to file");
-            filelock.unlock().unwrap();
-            println!("Unlocked file: {}", file_name);
+            let _ = mapper.writer_handle.write_message(message).await;
+
         }
     }
     internal_buffer.clear();
@@ -166,9 +174,9 @@ pub struct HandleMapper {
 }
 
 impl HandleMapper {
-    pub fn new() -> Self {
+    pub fn new(writer: writer::WriterHandle) -> Self {
         let (sender, receiver) = mpsc::channel(8);
-        let mapper = Mapper::new(receiver);
+        let mapper = Mapper::new(receiver, writer);
         tokio::spawn(run_mapper(mapper));
 
         Self { sender }
@@ -220,7 +228,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mapper() {
-        let mapper = HandleMapper::new();
+        let writer_handle = writer::WriterHandle::new().await;
+        let mapper = HandleMapper::new(writer_handle);
         let id1 = mapper.get_unique_id().await;
         let id2 = mapper.get_unique_id().await;
         println!("id1: {}, id2: {}", id1, id2);
@@ -229,14 +238,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_mapper_load_file() {
-        let mapper = HandleMapper::new();
+        let writer_handle = writer::WriterHandle::new().await;
+        let mapper = HandleMapper::new(writer_handle);
         let res = mapper.load_file(PathBuf::from("./test.txt")).await;
         assert_eq!("Hello World!\n", &res);
     }
 
     #[tokio::test]
     async fn test_mapper_process_file() {
-        let mapper = HandleMapper::new();
+        let writer_handle = writer::WriterHandle::new().await;
+        let mapper = HandleMapper::new(writer_handle);
         let res = mapper.process_file(PathBuf::from("./test.txt")).await;
         let map: BTreeMap<String, u32> =
             BTreeMap::from([(String::from("hello"), 1), (String::from("world!"), 1)]);
@@ -246,7 +257,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_mapper_process_files() {
-        let mapper = HandleMapper::new();
+        let writer_handle = writer::WriterHandle::new().await;
+        let mapper = HandleMapper::new(writer_handle);
         let res = mapper
             .process_file_with_buffer(PathBuf::from("./test.txt"))
             .await;

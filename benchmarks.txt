@@ -1,0 +1,9 @@
+For just mapper step
+________________________________________________________
+Executed in   74.46 secs    fish           external
+   usr time  116.05 secs  563.00 micros  116.04 secs
+   sys time   30.49 secs  350.00 micros   30.49 secs
+
+
+amount of files processed: 1441
+
