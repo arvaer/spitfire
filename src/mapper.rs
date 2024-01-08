@@ -1,11 +1,9 @@
 use file_lock::*;
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::ops::DerefMut;
-use std::path::Path;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot, Mutex};
 mod helpers;
