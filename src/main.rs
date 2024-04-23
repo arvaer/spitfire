@@ -2,20 +2,26 @@
 mod mapper;
 mod reducer;
 mod writer;
+mod error;
+pub use self::error::{Error, Result};
 
 use std::collections::HashMap;
 use std::future::IntoFuture;
 
 #[tokio::main]
-async fn main() -> std::io::Result<()> {
+async fn main() -> Result<()> {
     // ------------------ MAPPER ------------------
     let args: Vec<String> = std::env::args().collect();
-    let arg = args.get(1).expect("no argument given");
+    let arg = args.get(1).ok_or(Error::EmptyArguments)?;
     let directory = std::path::Path::new(arg);
-    let mut files = std::fs::read_dir(directory)?
-        .map(|res| res.unwrap().path())
-        .collect::<Vec<_>>();
-    println!("files: {:?}", files);
+    let files = std::fs::read_dir(directory)
+        .map_err(Error::DirectoryReadError)?
+        .map(|res|
+            res.map(|entry|
+                entry.path()))
+        .collect::<std::result::Result<Vec<_>, std::io::Error>>().map_err(Error::DirectoryReadError)?;
+
+    println!("files {:?}", files);
 
     let writer_handle = writer::WriterHandle::new().await;
 
